@@ -1,0 +1,405 @@
+#include <Adafruit_GFX.h>
+#include <MCUFRIEND_kbv.h>
+MCUFRIEND_kbv tft;
+#include <TouchScreen.h>
+#include <stdio.h>
+#include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSans12pt7b.h>
+#include <Fonts/FreeSerif12pt7b.h>
+#include <FreeDefaultFonts.h>
+#define MINPRESSURE 200
+#define MAXPRESSURE 1000
+
+#define MARK_COLOR WHITE
+#define SUBMARK_COLOR DARKGREY // LIGHTGREY
+#define HOUR_COLOR WHITE
+#define MINUTE_COLOR BLUE // LIGHTGREY
+#define SECOND_COLOR RED
+
+#define SIXTIETH 0.016666667
+#define TWELFTH 0.08333333
+#define SIXTIETH_RADIAN 0.10471976
+#define TWELFTH_RADIAN 0.52359878
+#define RIGHT_ANGLE_RADIAN 1.5707963
+// ALL Touch panels and wiring is DIFFERENT
+// copy-paste results from TouchScreen_Calibr_native.ino
+//3.5 Calibration
+//const int XP = 8, XM = A2, YP = A3, YM = 9; //320x480 ID=0x9486
+//const int TS_LEFT = 144, TS_RT = 887, TS_TOP = 936, TS_BOT = 87;
+/*PORTRAIT CALIBRATION     320 x 480
+  x = map(p.x, LEFT=144, RT=887, 0, 320)
+  y = map(p.y, TOP=936, BOT=87, 0, 480)
+  Touch Pin Wiring XP=8 XM=A2 YP=A3 YM=9
+  LANDSCAPE CALIBRATION    480 x 320
+  x = map(p.y, LEFT=936, RT=87, 0, 480)
+  y = map(p.x, TOP=887, BOT=144, 0, 320)*/
+//2.8 Calbiration
+const int XP=8,XM=A2,YP=A3,YM=9; //240x320 ID=0x9341
+const int TS_LEFT=907,TS_RT=120,TS_TOP=74,TS_BOT=913;
+/*PORTRAIT CALIBRATION     240 x 320
+  x = map(p.x, LEFT=907, RT=120, 0, 240)
+  y = map(p.y, TOP=74, BOT=913, 0, 320)
+  Touch Pin Wiring XP=8 XM=A2 YP=A3 YM=9
+  LANDSCAPE CALIBRATION    320 x 240
+  x = map(p.y, LEFT=74, RT=913, 0, 320)
+  y = map(p.x, TOP=120, BOT=907, 0, 240)*/
+TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
+TSPoint p;
+//Initializing Buttons ===============================================
+Adafruit_GFX_Button on_btn, off_btn, page1_btn, page2_btn, page3_btn;
+Adafruit_GFX_Button ok_btn, cncl_btn, plus_btn, minus_btn;
+Adafruit_GFX_Button menu_btn, info_btn, back_btn;
+//Initializing Buttons ===============================================
+int pixel_x, pixel_y;     //Touch_getXY() updates global vars
+// Button calibration
+int margin = 5;
+int btnWidth = 100;
+int btnHeight = 40;
+int btnY = 200;
+// Software variable
+bool enable_nuit = false;
+int parameter = 50, old_parameter = 50;
+long temp0 = 60;
+long temp1 = 25.5;
+long temp2 = 40;
+long temp3 = 35.6;
+#define BLACK   0x0000
+#define GREY    0x5555
+#define BLUE    0x001F
+#define RED     0xF800
+#define GREEN   0x07E0
+#define DARKGREEN   0x05C0
+#define CYAN    0x07FF
+#define MAGENTA 0xF81F
+#define YELLOW  0xFFE0
+#define GOLD    0xDDC0
+#define WHITE   0xFFFF
+enum pageId {
+ MENU,
+ CLOCK,
+ CMD,
+ PARAM,
+ INFO
+};
+unsigned int currentPage = MENU, oldPage = -1;
+
+//========CLOCK PARAMS
+#if defined(__SAM3X8E__)
+#undef __FlashStringHelper::F(string_literal)
+#define F(string_literal) string_literal
+#endif
+
+
+uint8_t hh, mm, ss;
+uint32_t targetTime = 0;   
+int date_month, date_day, date_year;
+String date_month_string, date_day_string, date_year_string;
+unsigned long time_val, old_time_val, old_time_val_1;
+
+
+int text_size = 3;
+int time_cursor_x = 10;
+int time_cursor_y = 110;
+
+byte omm = 99, oss = 99;
+byte xcolon = 0, xsecs = 0;
+
+uint8_t conv2d(const char* p)
+{
+  uint8_t v = 0;
+  if ('0' <= *p && *p <= '9') v = *p - '0';
+  return 10 * v + *++p - '0';
+}
+//========CLOCK PARAMS
+
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(9600);
+ //init TFTTouch
+ uint16_t ID = tft.readID();
+ Serial.print("TFT ID = 0x");
+ Serial.println(ID, HEX);
+ Serial.println(F("Calibrate for your Touch Panel"));
+ if (ID == 0xD3D3) ID = 0x9486;  //for 3.5" TFT LCD Shield , 0x9341 for 2.8" TFT LCD Shield
+ tft.begin(ID);
+ tft.setRotation(1); //0-PORTRAIT 1-PAYSAGE 2-REVERSE PORTRAIT 3-REVERSE PAYSAGE
+ //tft.setFont(&FreeSmallFont);
+ /*if (!SD.begin(SD_CS)) {
+    Serial.println(F("initialization failed!"));
+    return;
+    }*/
+ currentPage = MENU; // Indicates that we are at Home Screen
+ Serial.println("Home Page");
+
+ //========= CLOCK
+ while (!Serial) ;                                 // wacht tot deze is opgestard
+  String date_string = __DATE__;
+
+  hh = conv2d(__TIME__);
+  mm = conv2d(__TIME__ + 3);
+  ss = conv2d(__TIME__ + 6);
+  date_month_string = date_string.substring(0, 3);
+  date_day_string = date_string.substring(4, 6);
+  date_year_string = date_string.substring(7, 11);
+
+
+  date_year = date_year_string.toInt();
+  date_day = date_day_string.toInt();
+  date_month = month_string_to_int(date_month_string);
+
+  targetTime = millis() + 1000;
+  
+  //OCR0A = 0xAF;
+  //TIMSK0 |= _BV(OCIE0A);
+ //========= CLOCK
+
+}
+
+/************************************************************************************
+    SCREENS DEFINTION
+ ************************************************************************************/
+void drawMenuScreen() {
+ tft.fillScreen(BLUE);
+ tft.setTextSize(2);
+ // Title
+ tft.setTextColor(WHITE, BLACK);
+ tft.setCursor(0, 10);
+ tft.print("Menu"); // Prints the string on the screen
+ tft.drawLine(0, 32, tft.width() * 0.6, 32, RED); // Draws the red line
+ tft.setTextColor(WHITE, BLACK);//((255, 255, 255), (0,0,0));
+ tft.setCursor(0, 80);
+ tft.setTextColor(GREEN, BLACK);//((255, 255, 255), (0,0,0));
+ // Button
+ page1_btn.initButton(&tft,  tft.width() / 2. , tft.height() / 2. - (1.*btnHeight + margin), 2 * btnWidth, btnHeight, WHITE, GREEN, BLACK, "CLOCK", 2);
+ page2_btn.initButton(&tft, tft.width() / 2., tft.height() / 2., 2 * btnWidth, btnHeight, WHITE, GREEN, BLACK, "COMMAND", 2);
+ page3_btn.initButton(&tft, tft.width() / 2., tft.height() / 2. + (1.*btnHeight + margin), 2 * btnWidth, btnHeight, WHITE, GREEN, BLACK, "PARAMETER", 2);
+ page1_btn.drawButton(false);
+ page2_btn.drawButton(false);
+ page3_btn.drawButton(false);
+ //Button frame
+ tft.drawRoundRect(tft.width() / 2. - 1.5 * btnWidth, tft.height() / 2. - (1.5 * btnHeight + 2 * margin), 2 * btnWidth + btnWidth, 3 * btnHeight + 4 * margin, 10, GREEN);
+ oldPage = currentPage;
+  Serial.print(tft.height());
+  Serial.print("      ");
+  Serial.print(tft.width());
+}
+bool down ;
+void loop(void) {
+  // put your main code here, to run repeatedly:
+  switch (currentPage) {
+   case MENU: //Menu page
+     if (currentPage != oldPage)   drawMenuScreen();
+     page1_btn.press(down && page1_btn.contains(pixel_x, pixel_y));
+     page2_btn.press(down && page2_btn.contains(pixel_x, pixel_y));
+     page3_btn.press(down && page3_btn.contains(pixel_x, pixel_y));
+     if (page1_btn.justReleased())
+       page1_btn.drawButton();
+     if (page2_btn.justReleased())
+       page2_btn.drawButton();
+     if (page3_btn.justReleased())
+       page3_btn.drawButton();
+     if (page1_btn.justPressed()) {
+       page1_btn.drawButton(true);
+       currentPage = CLOCK;
+     }
+     if (page2_btn.justPressed()) {
+       page2_btn.drawButton(true);
+       currentPage = CMD;
+     }
+     if (page3_btn.justPressed()) {
+       page3_btn.drawButton(true);
+       currentPage = PARAM;
+     }
+     break;
+   case CLOCK:
+     if (currentPage != oldPage)   drawClockScreen();
+     back_btn.press(down && back_btn.contains(pixel_x, pixel_y));
+     if (back_btn.justReleased())
+       back_btn.drawButton();
+     if (back_btn.justPressed()) {
+       back_btn.drawButton(true);
+       currentPage = MENU;
+     }
+     else{
+      updateClock();
+     }
+     
+     //readSensor();
+     //updateTemp();
+     /*menu_btn.press(down && menu_btn.contains(pixel_x, pixel_y));
+     info_btn.press(down && info_btn.contains(pixel_x, pixel_y));
+     if (menu_btn.justReleased())
+       menu_btn.drawButton();
+     if (info_btn.justReleased())
+       info_btn.drawButton();
+     if (menu_btn.justPressed()) {
+       menu_btn.drawButton(true);
+       currentPage = MENU;
+     }
+     if (info_btn.justPressed()) {
+       info_btn.drawButton(true);
+       currentPage = INFO;
+     }*/
+     break;
+  }
+if (oldPage == currentPage){
+   down = Touch_getXY();
+ }else{
+   down=false;
+ }
+}
+bool Touch_getXY(void)
+{
+ p = ts.getPoint();
+ pinMode(YP, OUTPUT);      //restore shared pins
+ pinMode(XM, OUTPUT);
+ digitalWrite(YP, HIGH);
+ digitalWrite(XM, HIGH);
+ bool pressed = (p.z > MINPRESSURE && p.z < MAXPRESSURE);
+ if (pressed) {
+   if (tft.width() <= tft.height()) { //Portrait
+     pixel_x = map(p.x, TS_LEFT, TS_RT, 0, tft.width()); //.kbv makes sense to me
+     pixel_y = map(p.y, TS_TOP, TS_BOT, 0, tft.height());
+   } else {
+     pixel_x = map(p.y, TS_TOP, TS_BOT, 0, tft.width());
+     pixel_y = map(p.x, TS_RT, TS_LEFT, 0, tft.height());
+   }
+ }
+ return pressed;
+}
+void showmsgXY(int x, int y, int sz, String msg)
+{
+    int16_t x1, y1;
+    uint16_t wid, ht;
+    tft.drawFastHLine(0, y-10, tft.width(), WHITE);
+    //tft.setFont(f);
+    tft.setCursor(x, y);
+    tft.setTextColor(GREEN);
+    tft.setTextSize(sz);
+    tft.print(msg);
+    delay(100);
+}
+
+//Clock Screen
+//===================================
+void drawClockScreen() {
+ back_btn.initButton(&tft,  60 , 20, btnWidth, btnHeight, BLACK, BLACK, WHITE, "<- Back", 2);
+ 
+ tft.fillScreen(BLACK);
+ //tft.drawLine(tft.width() / 2., 0, tft.width() / 2., tft.height(), WHITE);  //Definition: x1y1, x2y2, color
+ //tft.drawLine(0, tft.height() / 2., tft.width(), tft.height() / 2., WHITE);
+ //updateTemp();
+ tft.setTextSize(1);
+ back_btn.drawButton(false);
+
+ //====================BODY START
+ tft.setTextSize(2);
+ //showmsgXY(20, 120, 1, "Digital Clock");
+ //tft.drawRect(tft.width() -80 , tft.height() -40, 90 , 30, WHITE);
+  updateClock();
+ 
+ //====================BODY END
+ 
+ // bouton centré X,Y
+ //menu_btn.initButton(&tft,  tft.width() / 2. - btnWidth - margin , tft.height() - btnHeight / 2., btnWidth, btnHeight, WHITE, GREY, BLACK, "MENU", 2);
+ //info_btn.initButton(&tft, tft.width() / 2. + btnWidth + margin, tft.height() - btnHeight / 2., btnWidth, btnHeight, WHITE, GREY, BLACK, "INFO", 2);
+ //menu_btn.drawButton(false);
+ //info_btn.drawButton(false);
+ oldPage = currentPage;
+}
+
+//============= clock func
+String act = "";
+
+char *w[] = {"Sun","Mon","Tue","Wed","Thu","Fri"};
+
+void updateClock(){
+  if (targetTime < millis()) {
+    // Set next update for 1 second later
+    targetTime = millis() + 1000;
+
+    // Adjust the time values by adding 1 second
+    ss++;              // Advance second
+    if (ss == 60) {    // Check for roll-over
+      ss = 0;          // Reset seconds to zero
+      omm = mm;        // Save last minute time for display update
+      mm++;            // Advance minute
+      if (mm > 59) {   // Check for roll-over
+        mm = 0;
+        hh++;          // Advance hour
+        if (hh > 23) { // Check for 24hr roll-over (could roll-over on 13)
+          hh = 0;      // 0 for 24 hour clock, set to 1 for 12 hour clock
+        }
+      }
+    }
+   
+   String HH = String(hh);
+   String MM = String(mm);
+   String SS = String(ss);
+   
+   //Serial.println(hh);
+   if(hh > 12){
+    hh -= 12;
+    act = "";
+    act = "AM";
+   }
+   else{
+    act = "";
+    act = "PM";
+   }
+
+  int dayy = dayofweek(date_day, date_month, date_year);
+   
+   String tt = HH + ":"+ MM +":"+ SS + " " + act ;
+   //showmsgXY(100, 100, 3, tt);
+   //date_day
+   String dd = String(date_day) + " " + date_month_string + " " +String(date_year);
+   drawTextInRect(100, 50, w[dayy], 4, YELLOW, 255);
+   drawTextInRect(100, 100, tt, 3, GREEN, 255);
+   drawTextInRect(100, 150, dd, 2, RED, 255);
+ }
+}
+
+
+int dayofweek(int d, int m, int y)
+{
+    static int t[] = { 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+    y -= m < 3;
+    return ( y + y/4 - y/100 + y/400 + t[m-1] + d) % 7;
+}
+
+String converter(uint8_t *str){
+    return String((char *)str);
+}
+
+
+int month_string_to_int(String date_month_string) {
+  if (date_month_string == "Jan")return 1;
+  if (date_month_string == "Feb")return 2;
+  if (date_month_string == "Mar") return 3;
+  if (date_month_string == "Apr") return 4;
+  if (date_month_string == "May") return 5;
+  if (date_month_string == "Jun") return 6;
+  if (date_month_string == "Jul") return 7;
+  if (date_month_string == "Aug") return 8;
+  if (date_month_string == "Sep") return 9;
+  if (date_month_string == "Oct") return 10;
+  if (date_month_string == "Nov") return 11;
+  if (date_month_string == "Dec") return 12;
+}
+//============= end clock func
+void drawTextInRect(int x, int y, String text, int tsize, unsigned int fColor, unsigned int bColor) {
+ int marg = 10;
+ char buf[12];
+ //int nbChar = strlen(itoa(text, buf, 10)) + 2;
+ //if (bColor != 255) tft.fillRect(x - nbChar * 3 * tsize - marg, y - nbChar * 1 * tsize - marg, nbChar * 6 * tsize + 2 * marg, nbChar * 2 * tsize + 2 * marg, bColor);
+ tft.setTextSize(tsize);
+ tft.setTextColor(fColor, BLACK);
+ //tft.setCursor(x-strlen(*text)*3*tsize+marg, y+rheight/2.+marg);
+ tft.setCursor(x, y);
+ tft.print(text);
+ //while(*text) tft.print(*text++);
+ //tft.write(0xF7);
+ //tft.print("C");
+}
